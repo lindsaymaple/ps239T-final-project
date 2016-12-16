@@ -1,0 +1,289 @@
+---
+title: 'PS239T: California’s Investment in PK-12 Public School Infrastructure'
+author: "Lindsay Maple"
+date: "Fall 2016"
+output: ioslides_presentation
+---
+```{r, include=FALSE, error=TRUE}
+library(choroplethr)
+library(choroplethrMaps)
+library(leaflet)
+library(sp)
+library(RColorBrewer)
+library(foreign)
+library(dplyr)
+library(maps)
+library(mapdata)
+library(rgdal)
+library(maptools)
+library(rgeos)
+library(readstata13)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r data cleaning, echo=TRUE, error=TRUE, include=FALSE}
+setwd(dir="~/Documents/CCS_Housing/")
+
+district_data <- read.csv("masterdata_LM.csv")
+
+#Need stata package to read
+alldata_MO <- read.dta13("alldata12.dta")
+
+alldata_subset <- subset(alldata_MO,
+                         select=c(cds_dist,dist_name,county,bc,bcstudent,sfp_nc,sfp_mod,sfp_fh,
+                         mo5yr,cap5yr,opsp5yr,sfpyears_mo_ps,sfpyears_cap_ps,sfpyears_opsp_ps,
+                         sfpyears_statecap_ps,currdebt,currdebt_ps,sf_total,rep_value,localcap,localcap5yr,
+                         gf_benchmark,crv_4pct,crv_3pct,crv_2pct,benchmark_gap,mo_gfbenchmark_gap,mo_gap,
+                         cap_gap))
+
+
+district_subset <- subset(district_data,
+                          select=c(cds_id,fips_code,District..Name,County.Name,AV.Per.Student,FRPM.Share,
+                                   Total.Enrollment))
+
+##Change the names to merge the datasets
+names(district_subset) <- c("cds_dist","fips_code","dist_name", "county", "avperstudent", "frpm_share", "total_enroll") 
+
+merged_data <- merge(alldata_subset, district_subset, by=c("cds_dist", "county", "dist_name"), all.x=TRUE)
+```
+
+## California School Facilities Spending
+
+The majority of school districts in California do not meet minimum annual facility expenditure benchmarks, even—in many cases—with state funding. 
+
+Between 2008 and 2012, at least 57% of districts did not meet industry benchmarks for spending on capital renewals and more than 60% failed to meet the benchmark for basic maintenance and operations. 
+
+In many cases, the same school districts are falling behind on both measures.
+
+
+## Project Design
+
+- This project required lots of data cleaning and merging. I used Stata for some of the data cleaning before merging datasets in R. 
+- Choroplethr provided the basis for understanding where and how much spending is going towards public school facilities. 
+- Leaflet enabled me to include pop-ups for interactive maps that show specifics about each California county.
+
+
+```{r AVmap, include=FALSE, error=TRUE}
+#subsetting data so I'm not dealing with a million variables
+county.spending <- subset(district_data, 
+                          select=c(fips_code, County.Name, Bond.Passed.11.2016,Bond.Passed.6.2016, 
+                                   AV.Per.Student, FRPM.Share, Region.Code))
+
+#fips codes for Choropleth requirements
+fipscodes1 <- data.frame(region=county.spending$fips_code, value=county.spending$AV.Per.Student)
+
+avfipsclean <- fipscodes1[complete.cases(fipscodes1),]
+
+fips.av <- avfipsclean %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+
+##Choropleth map for Assessed value
+AVmap <- county_choropleth(fips.av, 
+                  title = "Assessed Value Per Student by County",
+                  legend = "AV $ per student", 
+                  num_colors = 5,
+                  state_zoom = "california")
+
+#data frames by names for Leaflet requirements
+countynames <- data.frame(region=county.spending$County.Name, value=county.spending$AV.Per.Student)
+
+avnamesclean <- countynames[complete.cases(countynames),]
+
+names.av <- avnamesclean %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+```
+
+```{r, error=TRUE, include=FALSE}
+## Choropleth: Average Assessed Value per Student by County 
+AVmap
+```
+
+
+```{r FRPM Map, echo=TRUE, error=TRUE, include=FALSE}
+#fips codes for Choropleth requirements
+FRPM_df <- data.frame(region=district_data$fips_code, value=district_data$FRPM.Share)
+
+clean_FRPM<-FRPM_df[complete.cases(FRPM_df),]
+
+CA.FRPM <- clean_FRPM %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+
+## Choropleth map for Free & Reduced Lunch
+FRPMmap <- county_choropleth(CA.FRPM, 
+                  title = "Free & Reduced Priced Lunch by County",
+                  legend = "FRPM Average \nProportion by County", 
+                  num_colors = 6,
+                  state_zoom = "california")
+
+#data frames by county names for Leaflet requirements
+FRPMnames <- data.frame(region=merged_data$county, value=merged_data$frpm_share)
+
+frpmnamesclean <- FRPMnames[complete.cases(FRPMnames),]
+
+names_frpm <- frpmnamesclean %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+```
+
+```{r, error=TRUE, include=FALSE}
+## Choropleth: Average Free & Reduced Priced Lunch Share by County 
+FRPMmap
+```
+
+```{r M&O spending, echo=TRUE, error=TRUE, include=FALSE}
+#fips codes for Choropleth requirements
+MOspending_df <- data.frame(region=merged_data$fips_code, value=merged_data$mo_gap)
+
+clean_MOspdf<-MOspending_df[complete.cases(MOspending_df),]
+
+MOspending <- clean_MOspdf %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+
+#Choropleth map for gap in spending above/below benchmark
+MOmap <- county_choropleth(MOspending, 
+                  title = "Gap in M&O Benchmark Spending \nby County",
+                  legend = "Dollars Away from Benchmark",
+                  num_colors = 6,
+                  state_zoom = "california") 
+
+# data frames by county names for Leaflet requirements
+MOnames <- data.frame(region=merged_data$county, value=merged_data$mo_gap)
+
+clean_MOnames <- MOnames[complete.cases(MOnames),]
+
+MOnames_final <- clean_MOnames %>% 
+  group_by(region)  %>% 
+  summarise(value=mean(value, na.rm=T)) 
+```
+
+
+```{r, error=TRUE, include=FALSE}
+## Choropleth: Maintenance & Operations Spending by County 
+MOmap
+```
+
+
+```{r AV interactive map, error=TRUE, include=FALSE}
+#input shapefile for California counties 
+counties <- readShapeSpatial('CA_counties.shp')
+names(counties)
+sort(counties$NAME)
+
+#merging in the data into this shapefile
+#datacounties <- data.frame(counties@data, names.av[match(counties[,"NAME"], names.av[,"region"]),])
+
+#set color palette
+pal <- colorNumeric("YlGn", NULL, n = 5)
+
+#create the popup text
+county_popup <- paste0("<strong>County: </strong>", 
+                      names.av$region, 
+                      "<br><strong>AV per student:</strong>", 
+                      names.av$value)
+
+#write the interactive Leaflet map
+assessedvalue <- leaflet(counties) %>% 
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(fillColor = ~pal(names.av$value),
+              weight = 1,
+              stroke = TRUE,
+              fillOpacity = .8,
+              data = counties,
+              popup = ~paste("<strong>County:</strong>",NAME,
+                             "<br>",
+                             "<strong>AV per student:</strong>",names.av$value,
+                             "<br>")) %>%
+  addLegend(title = "Assessed Value <br> Per Student", 
+            values = names.av$value, 
+            bins=3, 
+            labels = 5,
+            position="topright", 
+            pal = pal,
+            labFormat = labelFormat(suffix = ''))
+```
+
+## Leaflet: Assessed Value Per Student Interactive Map
+```{r AV, error=TRUE}
+assessedvalue
+```
+
+```{r FRPM interactive map, error=TRUE, include=FALSE}
+#create the popup text
+FRPM_popup <- paste0("<strong>County: </strong>", 
+                      names_frpm$region, 
+                      "<br><strong>Average FRPM Share:</strong>", 
+                      names_frpm$value)
+
+#set color palette
+FRPMpal <- colorQuantile("YlGn", NULL, n = 5)
+
+#write the interactive Leaflet map
+FRPMleaflet <- leaflet(counties) %>% 
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(fillColor = ~FRPMpal(names_frpm$value),
+              weight = 1,
+              stroke = TRUE,
+              fillOpacity = .8,
+              data = counties,
+              popup = ~paste("<strong>County:</strong>",NAME,
+                             "<br>",
+                             "<strong>Average FRPM Share:</strong>",names_frpm$value,
+                             "<br>")) %>%
+  addLegend(title = "Average FRPM Share", 
+            values = names_frpm$value, 
+            bins=3, 
+            labels = 5,
+            position="topright", 
+            pal = FRPMpal,
+            labFormat = labelFormat(suffix = ''))
+```
+
+## Leaflet: FRPM Interactive Map by County
+```{r, error=TRUE}
+FRPMleaflet
+```
+
+```{r MO interactive map, error=TRUE, include=FALSE}
+#Set color palette for this map
+MOpal <- colorNumeric(
+  palette = "Greens",
+  domain = MOnames_final$value)
+
+#write the interactive Leaflet map
+MOleaflet <- leaflet(counties) %>% 
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(fillColor = ~MOpal(MOnames_final$value),
+              weight = 1,
+              stroke = TRUE,
+              fillOpacity = .8,
+              data = counties,
+              popup = ~paste("<strong>County:</strong>",NAME,
+                             "<br>",
+                             "<strong>Current spending <br> from benchmark:</strong>",MOnames_final$value,
+                             "<br>")) %>%
+  addLegend(title = "Current Spending from <br>Minimum Benchmark", 
+            values = MOnames_final$value, 
+            bins=10, 
+            labels = 5,
+            position="topright", 
+            pal = MOpal,
+            labFormat = labelFormat(suffix = ''))
+```
+
+## Leaflet: Maintenance & Operations Spending Gap by County
+```{r, error=TRUE}
+MOleaflet
+```
+
+## Next Steps
+
+- There are still some flaws in the code (ie. on the Assessed Value leaflet map, I have no idea where those values are coming from; and similarly for the Benchmark Spending)
+- I want to add more layers to the leaflet maps including which counties passed bond measures in 2016 for school infrastructure. 
+- I couldn't get the Choropleth maps to knit into this HTML, so I decided to remove them. However, I think they can be rather helpful (even though I prefer the Leaflet maps)
